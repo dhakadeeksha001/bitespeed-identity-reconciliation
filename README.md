@@ -17,7 +17,7 @@ This service reconciles contact information by matching emails and phone numbers
 
 ## API
 
-### `POST /reconcile`
+### `POST /identify`
 
 **Request:**
 
