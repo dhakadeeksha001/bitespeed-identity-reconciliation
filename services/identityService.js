@@ -2,7 +2,7 @@ const { Op } = require('sequelize');
 const Contact = require('../models/contact');
 
 exports.reconcileIdentity = async (email, phoneNumber) => {
-    // Step 1: Find contacts where email or phoneNumber matches
+    // Step 1: Find contacts that match email or phoneNumber
     const matchedContacts = await Contact.findAll({
         where: {
             [Op.or]: [
@@ -13,8 +13,12 @@ exports.reconcileIdentity = async (email, phoneNumber) => {
         order: [['createdAt', 'ASC']]
     });
 
-    // Case 1 & 2: No match found, create a new primary contact
     if (matchedContacts.length === 0) {
+        // No contacts matched → create new primary if either email or phoneNumber exists
+        if (!email && !phoneNumber) {
+            return { contact: null };
+        }
+
         const newPrimary = await Contact.create({
             email,
             phoneNumber,
@@ -24,52 +28,72 @@ exports.reconcileIdentity = async (email, phoneNumber) => {
         return {
             contact: {
                 primaryContactId: newPrimary.id,
-                emails: [newPrimary.email].filter(Boolean),
-                phoneNumbers: [newPrimary.phoneNumber].filter(Boolean),
+                emails: [email].filter(Boolean),
+                phoneNumbers: [phoneNumber].filter(Boolean),
                 secondaryContactIds: []
             }
         };
     }
 
-    // Case 3: One match found, but only one field matches
-    if (matchedContacts.length === 1) {
-        const existing = matchedContacts[0];
+    // Step 2: Identify the true primary contact
+    let truePrimary = matchedContacts.find(c => c.linkPrecedence === 'primary');
 
-        const emailMatch = email && existing.email === email;
-        const phoneMatch = phoneNumber && existing.phoneNumber === phoneNumber;
-
-        const needsSecondary =
-            (email && !emailMatch) || (phoneNumber && !phoneMatch);
-
-
-        if (needsSecondary) {
-            const newSecondary = await Contact.create({
-                email,
-                phoneNumber,
-                linkPrecedence: 'secondary',
-                linkedId: existing.id
-            });
-
-            return {
-                contact: {
-                    primaryContactId: existing.id,
-                    emails: [existing.email, email].filter(Boolean),
-                    phoneNumbers: [existing.phoneNumber, phoneNumber].filter(Boolean),
-                    secondaryContactIds: [newSecondary.id]
-                }
-            };
-        } else {
-            return {
-                contact: {
-                    primaryContactId: existing.id,
-                    emails: [existing.email].filter(Boolean),
-                    phoneNumbers: [existing.phoneNumber].filter(Boolean),
-                    secondaryContactIds: []
-                }
-            };
-        }
+    if (!truePrimary && matchedContacts.length > 0) {
+        // matched contacts are secondaries only, get their primary by linkedId
+        const primaryId = matchedContacts[0].linkedId;
+        truePrimary = await Contact.findOne({ where: { id: primaryId } });
     }
 
-    // For these 3 cases, we shouldn't reach here
-    return { contact: null };
+    // Step 3: Fetch all contacts linked to this true primary
+    const relatedContacts = await Contact.findAll({
+        where: {
+            [Op.or]: [
+                { id: truePrimary.id },
+                { linkedId: truePrimary.id }
+            ]
+        },
+        order: [['createdAt', 'ASC']]
+    });
+
+    // Step 4: Check if new contact needed (any new info not present)
+    const emailsSet = new Set(relatedContacts.map(c => c.email).filter(Boolean));
+    const phonesSet = new Set(relatedContacts.map(c => c.phoneNumber).filter(Boolean));
+
+    let needsSecondary = false;
+
+    if (email && !emailsSet.has(email)) {
+        needsSecondary = true;
+    }
+    if (phoneNumber && !phonesSet.has(phoneNumber)) {
+        needsSecondary = true;
+    }
+
+    if (needsSecondary) {
+        const newSecondary = await Contact.create({
+            email,
+            phoneNumber,
+            linkPrecedence: 'secondary',
+            linkedId: truePrimary.id
+        });
+
+        relatedContacts.push(newSecondary);
+        emailsSet.add(email);
+        phonesSet.add(phoneNumber);
+    }
+
+    // Step 5: Prepare response arrays without duplicates
+    const emails = Array.from(emailsSet);
+    const phoneNumbers = Array.from(phonesSet);
+    const secondaryContactIds = relatedContacts
+        .filter(c => c.linkPrecedence === 'secondary')
+        .map(c => c.id);
+
+    return {
+        contact: {
+            primaryContactId: truePrimary.id,
+            emails,
+            phoneNumbers,
+            secondaryContactIds
+        }
+    };
 };
