@@ -4,6 +4,13 @@ This service reconciles contact information by matching emails and phone numbers
 
 ---
 
+## Hosted Endpoint
+
+🔗 **Base URL**:
+[`https://bitespeed-identity-reconciliation-7phi.onrender.com`](https://bitespeed-identity-reconciliation-7phi.onrender.com)
+
+---
+
 ## Features
 
 * Create and reconcile contacts by email and/or phone.
@@ -18,6 +25,9 @@ This service reconciles contact information by matching emails and phone numbers
 ## API
 
 ### `POST /identify`
+
+**Endpoint:**
+`POST https://bitespeed-identity-reconciliation-7phi.onrender.com/identify`
 
 **Request:**
 
@@ -48,5 +58,3 @@ This service reconciles contact information by matching emails and phone numbers
 * Only one primary contact per user.
 * Older primary contact remains primary; others are converted to secondary if overlapping.
 * New contact entries are added only if no existing exact match exists.
-
----
